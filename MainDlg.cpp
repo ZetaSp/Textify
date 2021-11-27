@@ -447,8 +447,8 @@ void CMainDlg::ApplyMouseAndKeyboardHotKeys()
 		{
 			CString str = AtlGetErrorDescription(e);
 			MessageBox(
-				L"The following error has occurred during the initialization of Textify:\n" + str,
-				L"Textify mouse hotkey initialization error", MB_ICONERROR);
+				L"Textify 初始化时出现以下错误:\n" + str,
+				L"Textify 鼠标激活方式初始化错误", MB_ICONERROR);
 		}
 	}
 	else
@@ -463,8 +463,8 @@ void CMainDlg::ApplyMouseAndKeyboardHotKeys()
 		{
 			CString str = AtlGetErrorDescription(HRESULT_FROM_WIN32(GetLastError()));
 			MessageBox(
-				L"The following error has occurred during the initialization of Textify:\n" + str,
-				L"Textify keyboard hotkey initialization error", MB_ICONERROR);
+				L"Textify 初始化时出现以下错误:\n" + str,
+				L"Textify 键盘激活方式初始化错误", MB_ICONERROR);
 		}
 	}
 	else if(m_config->m_keybdHotKey.key == 0 && m_registeredHotKey)
