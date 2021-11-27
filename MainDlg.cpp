@@ -4,6 +4,7 @@
 #include "MainDlg.h"
 #include "TextDlg.h"
 #include "SettingsDlg.h"
+#include "update.h"
 #include "version.h"
 
 BOOL CMainDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
@@ -19,20 +20,10 @@ BOOL CMainDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 	HICON hIconSmall = AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON));
 	SetIcon(hIconSmall, FALSE);
 
-	// Init dialog.
-	CString introText;
-	GetDlgItemText(IDC_MAIN_SYSLINK, introText);
-	introText.Replace(L"%s", VER_FILE_VERSION_WSTR);
-	SetDlgItemText(IDC_MAIN_SYSLINK, introText);
-
-	auto keysComboWnd = CComboBox(GetDlgItem(IDC_COMBO_KEYS));
-	keysComboWnd.AddString(L"鼠标左键");
-	keysComboWnd.AddString(L"鼠标右键");
-	keysComboWnd.AddString(L"鼠标中键");
-
 	// Load and apply config.
-	m_config = std::make_unique<UserConfig>();
-	InitMouseAndKeyboardHotKeys();
+	m_config.emplace();
+	ApplyUiLanguage();
+	ApplyMouseAndKeyboardHotKeys();
 	ConfigToGui();
 
 	// Init and show tray icon.
@@ -41,6 +32,12 @@ BOOL CMainDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 	if(!m_config->m_hideTrayIcon)
 	{
 		Shell_NotifyIcon(NIM_ADD, &m_notifyIconData);
+	}
+
+	// Start timer to check for updates.
+	if(m_config->m_checkForUpdates)
+	{
+		SetTimer(TIMER_UPDATE_CHECK, 1000 * 10, NULL); // 10sec
 	}
 
 	return TRUE;
@@ -53,6 +50,11 @@ void CMainDlg::OnDestroy()
 	if(!m_config->m_hideTrayIcon)
 	{
 		Shell_NotifyIcon(NIM_DELETE, &m_notifyIconData);
+	}
+
+	if(m_config->m_checkForUpdates)
+	{
+		KillTimer(TIMER_UPDATE_CHECK);
 	}
 }
 
@@ -76,9 +78,15 @@ LRESULT CMainDlg::OnNotify(int idCtrl, LPNMHDR pnmh)
 		case NM_RETURN:
 			if((int)ShellExecute(m_hWnd, L"open", ((PNMLINK)pnmh)->item.szUrl, NULL, NULL, SW_SHOWNORMAL) <= 32)
 			{
-				CString str = L"打开以下网址时出错:\n";
-				str += ((PNMLINK)pnmh)->item.szUrl;
-				MessageBox(str, NULL, MB_ICONHAND);
+				CString title;
+				title.LoadString(IDS_ERROR);
+
+				CString text;
+				text.LoadString(IDS_ERROR_OPEN_ADDRESS);
+				text += L"\n";
+				text += ((PNMLINK)pnmh)->item.szUrl;
+
+				MessageBox(text, title, MB_ICONERROR);
 			}
 			break;
 		}
@@ -101,6 +109,31 @@ void CMainDlg::OnHotKey(int nHotKeyID, UINT uModifiers, UINT uVirtKey)
 	}
 }
 
+void CMainDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	if(nIDEvent == TIMER_UPDATE_CHECK)
+	{
+		KillTimer(TIMER_UPDATE_CHECK);
+
+		if(UpdateCheckInit(m_hWnd, UWM_UPDATE_CHECKED))
+		{
+			if(UpdateCheckQueue())
+			{
+				m_checkingForUpdates = true;
+			}
+			else
+			{
+				UpdateCheckCleanup();
+			}
+		}
+
+		if(!m_checkingForUpdates)
+		{
+			SetTimer(TIMER_UPDATE_CHECK, 1000 * 60 * 60, NULL); // 1h
+		}
+	}
+}
+
 void CMainDlg::OnOK(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
 	bool ctrlKey = (CButton(GetDlgItem(IDC_CHECK_CTRL)).GetCheck() != BST_UNCHECKED);
@@ -109,8 +142,13 @@ void CMainDlg::OnOK(UINT uNotifyCode, int nID, CWindow wndCtl)
 
 	if(!ctrlKey && !altKey && !shiftKey)
 	{
-		if(MessageBox(L"您设置了一个纯鼠标的激活方式。\n"
-			L"确定要继续吗？", L"请确定", MB_ICONWARNING | MB_YESNO) != IDYES)
+		CString title;
+		title.LoadString(IDS_MAINDLG_WARNING_MODIFIER_TITLE);
+
+		CString text;
+		text.LoadString(IDS_MAINDLG_WARNING_MODIFIER_TEXT);
+
+		if(MessageBox(text, title, MB_ICONWARNING | MB_YESNO) != IDYES)
 		{
 			return;
 		}
@@ -141,8 +179,7 @@ void CMainDlg::OnOK(UINT uNotifyCode, int nID, CWindow wndCtl)
 
 	m_config->SaveToIniFile();
 
-	m_mouseGlobalHook->SetNewHotkey(mouseKey, ctrlKey, altKey, shiftKey);
-	m_mouseGlobalHook->SetNewExcludedPrograms(m_config->m_excludedPrograms);
+	ApplyMouseAndKeyboardHotKeys();
 
 	CButton(GetDlgItem(IDOK)).EnableWindow(FALSE);
 }
@@ -158,17 +195,39 @@ void CMainDlg::OnShowIni(UINT uNotifyCode, int nID, CWindow wndCtl)
 	INT_PTR nRet = settingsDlg.DoModal();
 	if(nRet == IDOK)
 	{
+		LANGID oldUiLanguage = m_config->m_uiLanguage;
+		bool oldCheckForUpdates = m_config->m_checkForUpdates;
 		bool oldHideTrayIcon = m_config->m_hideTrayIcon;
 
-		m_config = std::make_unique<UserConfig>();
-		UninitMouseAndKeyboardHotKeys();
-		InitMouseAndKeyboardHotKeys();
+		m_config.emplace();
+
+		LANGID newUiLanguage = m_config->m_uiLanguage;
+		bool newCheckForUpdates = m_config->m_checkForUpdates;
+		bool newHideTrayIcon = m_config->m_hideTrayIcon;
+
+		if(oldUiLanguage != newUiLanguage)
+		{
+			ApplyUiLanguage();
+		}
+
+		ApplyMouseAndKeyboardHotKeys();
 		ConfigToGui();
 
-		bool newHideTrayIcon = m_config->m_hideTrayIcon;
 		if(newHideTrayIcon != oldHideTrayIcon)
 		{
 			Shell_NotifyIcon(newHideTrayIcon ? NIM_DELETE : NIM_ADD, &m_notifyIconData);
+		}
+
+		if(newCheckForUpdates != oldCheckForUpdates && !m_checkingForUpdates)
+		{
+			if(newCheckForUpdates)
+			{
+				SetTimer(TIMER_UPDATE_CHECK, 1000 * 10, NULL); // 10sec
+			}
+			else
+			{
+				KillTimer(TIMER_UPDATE_CHECK);
+			}
 		}
 	}
 }
@@ -210,7 +269,7 @@ LRESULT CMainDlg::OnCustomTextifyMsg(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	switch(lParam)
 	{
 	case 1:
-		EndDialog(0);
+		MyEndDialog();
 		break;
 	}
 
@@ -253,46 +312,175 @@ LRESULT CMainDlg::OnBringToFront(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-LRESULT CMainDlg::OnExit(UINT uMsg, WPARAM wParam, LPARAM lParam)
+LRESULT CMainDlg::OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	EndDialog(0);
+	UpdateCheckCleanup();
+
+	if(m_config->m_checkForUpdates)
+	{
+		if(lParam == ERROR_SUCCESS)
+		{
+			DWORD dwUpdateVersion = UpdateCheckGetVersionLong();
+			if(dwUpdateVersion && dwUpdateVersion > VER_FILE_VERSION_LONG)
+			{
+				HWND hPopup = IsWindowEnabled() ? m_hWnd : GetLastActivePopup();
+				UpdateTaskDialog(hPopup, UpdateCheckGetVersion());
+			}
+
+			UpdateCheckFreeVersion();
+
+			SetTimer(TIMER_UPDATE_CHECK, 1000 * 60 * 60 * 24, NULL); // 24h
+		}
+		else
+		{
+			SetTimer(TIMER_UPDATE_CHECK, 1000 * 60 * 60, NULL); // 1h
+		}
+	}
+
+	m_checkingForUpdates = false;
+
+	if(m_closeWhenUpdateCheckDone)
+	{
+		EndDialog(0);
+	}
+
 	return 0;
 }
 
-void CMainDlg::InitMouseAndKeyboardHotKeys()
+LRESULT CMainDlg::OnExit(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	_ATLTRY
+	MyEndDialog();
+	return 0;
+}
+
+void CMainDlg::ApplyUiLanguage()
+{
+	LANGID uiLanguage = m_config->m_uiLanguage;
+
+	if(!uiLanguage)
 	{
-		const HotKey& mouseHotKey = m_config->m_mouseHotKey;
-		m_mouseGlobalHook = std::make_unique<MouseGlobalHook>(m_hWnd, UWM_MOUSEHOOKCLICKED,
-			mouseHotKey.key, mouseHotKey.ctrl, mouseHotKey.alt, mouseHotKey.shift,
-			m_config->m_excludedPrograms);
-	}
-	_ATLCATCH(e)
-	{
-		CString str = AtlGetErrorDescription(e);
-		MessageBox(
-			L"Textify 初始化时出现以下错误:\n" + str,
-			L"Textify 鼠标激活方式初始化错误", MB_ICONERROR);
+		CRegKey regKey;
+
+		DWORD dwError = regKey.Open(HKEY_CURRENT_USER, L"Software\\Textify", KEY_QUERY_VALUE);
+		if(dwError == ERROR_SUCCESS)
+		{
+			DWORD dwLanguage;
+			dwError = regKey.QueryDWORDValue(L"language", dwLanguage);
+			if(dwError == ERROR_SUCCESS)
+			{
+				uiLanguage = static_cast<LANGID>(dwLanguage);
+			}
+		}
 	}
 
-	if(m_config->m_keybdHotKey.key != 0)
+	if(uiLanguage)
+	{
+		OSVERSIONINFO osvi = { sizeof(OSVERSIONINFO) };
+		if(GetVersionEx(&osvi) && osvi.dwMajorVersion >= 6)
+		{
+			::SetThreadUILanguage(uiLanguage);
+		}
+		else
+		{
+			::SetThreadLocale(uiLanguage);
+		}
+	}
+
+	CString str;
+
+	str.LoadString(IDS_MAINDLG_TITLE);
+	SetWindowText(str);
+
+	str.LoadString(IDS_MAINDLG_HOMEPAGE);
+
+	CString headerStr;
+	headerStr.LoadString(IDS_MAINDLG_HEADER);
+	headerStr.Replace(L"%s", VER_FILE_VERSION_WSTR);
+	headerStr += L"\n<a href=\"https://rammichael.com/textify\">" + str + L"</a>";
+	SetDlgItemText(IDC_MAIN_SYSLINK, headerStr);
+
+	str.LoadString(IDS_MAINDLG_MOUSE_SHORTCUT);
+	SetDlgItemText(IDC_MOUSE_SHORTCUT, str);
+
+	str.LoadString(IDS_MAINDLG_CTRL);
+	SetDlgItemText(IDC_CHECK_CTRL, str);
+
+	str.LoadString(IDS_MAINDLG_ALT);
+	SetDlgItemText(IDC_CHECK_ALT, str);
+
+	str.LoadString(IDS_MAINDLG_SHIFT);
+	SetDlgItemText(IDC_CHECK_SHIFT, str);
+
+	CComboBox keysComboWnd(GetDlgItem(IDC_COMBO_KEYS));
+	int keysComboCurSel = keysComboWnd.GetCurSel();
+	keysComboWnd.ResetContent();
+	str.LoadString(IDS_MAINDLG_MOUSE_LEFT);
+	keysComboWnd.AddString(str);
+	str.LoadString(IDS_MAINDLG_MOUSE_RIGHT);
+	keysComboWnd.AddString(str);
+	str.LoadString(IDS_MAINDLG_MOUSE_MIDDLE);
+	keysComboWnd.AddString(str);
+	keysComboWnd.SetCurSel(keysComboCurSel);
+
+	str.LoadString(IDS_MAINDLG_APPLY);
+	SetDlgItemText(IDOK, str);
+
+	str.LoadString(IDS_MAINDLG_ADVANCED);
+	SetDlgItemText(IDC_ADVANCED, str);
+
+	str.LoadString(IDS_MAINDLG_MORE_SETTINGS);
+	SetDlgItemText(IDC_SHOW_INI, str);
+}
+
+void CMainDlg::ApplyMouseAndKeyboardHotKeys()
+{
+	if(m_config->m_mouseHotKey.key != 0)
+	{
+		_ATLTRY
+		{
+			const HotKey & mouseHotKey = m_config->m_mouseHotKey;
+			m_mouseGlobalHook.emplace(m_hWnd, UWM_MOUSEHOOKCLICKED,
+				mouseHotKey.key, mouseHotKey.ctrl, mouseHotKey.alt, mouseHotKey.shift,
+				m_config->m_excludedPrograms);
+		}
+		_ATLCATCH(e)
+		{
+			CString str = AtlGetErrorDescription(e);
+			MessageBox(
+				L"The following error has occurred during the initialization of Textify:\n" + str,
+				L"Textify mouse hotkey initialization error", MB_ICONERROR);
+		}
+	}
+	else
+	{
+		m_mouseGlobalHook.reset();
+	}
+
+	if(m_config->m_keybdHotKey.key != 0 && !m_registeredHotKey)
 	{
 		m_registeredHotKey = RegisterConfiguredKeybdHotKey(m_config->m_keybdHotKey);
 		if(!m_registeredHotKey)
 		{
 			CString str = AtlGetErrorDescription(HRESULT_FROM_WIN32(GetLastError()));
 			MessageBox(
-				L"Textify 初始化时出现以下错误:\n" + str,
-				L"Textify 键盘激活方式初始化错误", MB_ICONERROR);
+				L"The following error has occurred during the initialization of Textify:\n" + str,
+				L"Textify keyboard hotkey initialization error", MB_ICONERROR);
 		}
+	}
+	else if(m_config->m_keybdHotKey.key == 0 && m_registeredHotKey)
+	{
+		::UnregisterHotKey(m_hWnd, 1);
+		m_registeredHotKey = false;
 	}
 }
 
 void CMainDlg::UninitMouseAndKeyboardHotKeys()
 {
 	if(m_registeredHotKey)
+	{
 		::UnregisterHotKey(m_hWnd, 1);
+		m_registeredHotKey = false;
+	}
 
 	m_mouseGlobalHook.reset();
 }
@@ -345,6 +533,10 @@ void CMainDlg::ConfigToGui()
 	case VK_MBUTTON:
 		keysComboWnd.SetCurSel(2);
 		break;
+
+	default:
+		keysComboWnd.SetCurSel(-1);
+		break;
 	}
 
 	CButton(GetDlgItem(IDOK)).EnableWindow(FALSE);
@@ -369,9 +561,15 @@ void CMainDlg::NotifyIconRightClickMenu()
 	CMenu menu;
 	menu.CreatePopupMenu();
 
-	menu.AppendMenu(MF_STRING, RCMENU_SHOW, L"设置");
+	CString str;
+
+	str.LoadString(IDS_TRAY_TEXTIFY);
+	menu.AppendMenu(MF_STRING, RCMENU_SHOW, str);
+
 	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, RCMENU_EXIT, L"退出");
+
+	str.LoadString(IDS_TRAY_EXIT);
+	menu.AppendMenu(MF_STRING, RCMENU_EXIT, str);
 
 	CPoint point;
 	GetCursorPos(&point);
@@ -384,7 +582,20 @@ void CMainDlg::NotifyIconRightClickMenu()
 		break;
 
 	case RCMENU_EXIT:
-		EndDialog(0);
+		MyEndDialog();
 		break;
+	}
+}
+
+void CMainDlg::MyEndDialog()
+{
+	if(m_checkingForUpdates)
+	{
+		UpdateCheckAbort();
+		m_closeWhenUpdateCheckDone = true;
+	}
+	else
+	{
+		EndDialog(0);
 	}
 }
