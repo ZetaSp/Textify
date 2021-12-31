@@ -447,8 +447,8 @@ void CMainDlg::ApplyMouseAndKeyboardHotKeys()
 		{
 			CString str = AtlGetErrorDescription(e);
 			MessageBox(
-				L"Textify 初始化时出现以下错误:\n" + str,
-				L"Textify 鼠标激活方式初始化错误", MB_ICONERROR);
+				L"Textify 鍒濆鍖栨椂鍑虹幇浠ヤ笅閿欒:\n" + str,
+				L"Textify 榧犳爣婵�娲绘柟寮忓垵濮嬪寲閿欒", MB_ICONERROR);
 		}
 	}
 	else
@@ -463,8 +463,8 @@ void CMainDlg::ApplyMouseAndKeyboardHotKeys()
 		{
 			CString str = AtlGetErrorDescription(HRESULT_FROM_WIN32(GetLastError()));
 			MessageBox(
-				L"Textify 初始化时出现以下错误:\n" + str,
-				L"Textify 键盘激活方式初始化错误", MB_ICONERROR);
+				L"Textify 鍒濆鍖栨椂鍑虹幇浠ヤ笅閿欒:\n" + str,
+				L"Textify 閿洏婵�娲绘柟寮忓垵濮嬪寲閿欒", MB_ICONERROR);
 		}
 	}
 	else if(m_config->m_keybdHotKey.key == 0 && m_registeredHotKey)
