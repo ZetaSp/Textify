@@ -5,8 +5,8 @@
 
 ## 使用方法
 
-安装[原版软件](https://rammichael.com/textify)，然后安装[汉化](https://github.com/ZetaSp/Textify/releases)。
+安装[原版软件](https://ramensoftware.com/textify)，然后安装[汉化](https://github.com/ZetaSp/Textify/releases)。
 
 或者直接用汉化文件覆盖原文件。
 
-原作网站：https://rammichael.com/textify
+原作网站：https://ramensoftware.com/textify
