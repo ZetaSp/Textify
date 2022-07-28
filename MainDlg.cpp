@@ -9,8 +9,6 @@
 
 BOOL CMainDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 {
-	m_hideDialog = (lInitParam != 0);
-
 	// Center the dialog on the screen.
 	CenterWindow();
 
@@ -25,6 +23,14 @@ BOOL CMainDlg::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 	ApplyUiLanguage();
 	ApplyMouseAndKeyboardHotKeys();
 	ConfigToGui();
+
+	if(lInitParam || m_config->m_hideWndOnStartup)
+	{
+		m_hideDialog = true;
+		// Setting WS_EX_NOACTIVATE is a workaround for preventing the dialog
+		// from stealing focus on startup.
+		ModifyStyleEx(0, WS_EX_NOACTIVATE);
+	}
 
 	// Init and show tray icon.
 	InitNotifyIconData();
@@ -62,6 +68,7 @@ void CMainDlg::OnWindowPosChanging(LPWINDOWPOS lpWndPos)
 {
 	if(m_hideDialog && (lpWndPos->flags & SWP_SHOWWINDOW))
 	{
+		ModifyStyleEx(WS_EX_NOACTIVATE, 0);
 		lpWndPos->flags &= ~SWP_SHOWWINDOW;
 		m_hideDialog = false;
 	}
@@ -104,7 +111,7 @@ void CMainDlg::OnHotKey(int nHotKeyID, UINT uModifiers, UINT uVirtKey)
 		CPoint pt;
 		GetCursorPos(&pt);
 
-		CTextDlg dlgText(m_config->m_webButtonInfos, m_config->m_autoCopySelection, m_config->m_unicodeSpacesToAscii);
+		CTextDlg dlgText(*m_config);
 		dlgText.DoModal(NULL, reinterpret_cast<LPARAM>(&pt));
 	}
 }
@@ -232,6 +239,11 @@ void CMainDlg::OnShowIni(UINT uNotifyCode, int nID, CWindow wndCtl)
 	}
 }
 
+void CMainDlg::OnExitButton(UINT uNotifyCode, int nID, CWindow wndCtl)
+{
+	Exit();
+}
+
 void CMainDlg::OnConfigChanged(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
 	CButton(GetDlgItem(IDOK)).EnableWindow();
@@ -248,7 +260,7 @@ LRESULT CMainDlg::OnMouseHookClicked(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	CPoint pt;
 	GetCursorPos(&pt);
 
-	CTextDlg dlgText(m_config->m_webButtonInfos, m_config->m_autoCopySelection, m_config->m_unicodeSpacesToAscii);
+	CTextDlg dlgText(*m_config);
 	dlgText.DoModal(NULL, reinterpret_cast<LPARAM>(&pt));
 
 	return 0;
@@ -269,7 +281,7 @@ LRESULT CMainDlg::OnCustomTextifyMsg(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	switch(lParam)
 	{
 	case 1:
-		MyEndDialog();
+		Exit();
 		break;
 	}
 
@@ -341,7 +353,7 @@ LRESULT CMainDlg::OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	if(m_closeWhenUpdateCheckDone)
 	{
-		EndDialog(0);
+		::PostQuitMessage(0);
 	}
 
 	return 0;
@@ -349,7 +361,7 @@ LRESULT CMainDlg::OnUpdateChecked(UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 LRESULT CMainDlg::OnExit(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	MyEndDialog();
+	Exit();
 	return 0;
 }
 
@@ -430,6 +442,9 @@ void CMainDlg::ApplyUiLanguage()
 
 	str.LoadString(IDS_MAINDLG_MORE_SETTINGS);
 	SetDlgItemText(IDC_SHOW_INI, str);
+
+	str.LoadString(IDS_MAINDLG_EXIT);
+	SetDlgItemText(IDC_EXIT, str);
 }
 
 void CMainDlg::ApplyMouseAndKeyboardHotKeys()
@@ -582,12 +597,12 @@ void CMainDlg::NotifyIconRightClickMenu()
 		break;
 
 	case RCMENU_EXIT:
-		MyEndDialog();
+		Exit();
 		break;
 	}
 }
 
-void CMainDlg::MyEndDialog()
+void CMainDlg::Exit()
 {
 	if(m_checkingForUpdates)
 	{
@@ -596,6 +611,6 @@ void CMainDlg::MyEndDialog()
 	}
 	else
 	{
-		EndDialog(0);
+		::PostQuitMessage(0);
 	}
 }

@@ -38,13 +38,14 @@ public:
 		COMMAND_ID_HANDLER_EX(IDOK, OnOK)
 		COMMAND_ID_HANDLER_EX(IDCANCEL, OnCancel)
 		COMMAND_ID_HANDLER_EX(IDC_SHOW_INI, OnShowIni)
+		COMMAND_ID_HANDLER_EX(IDC_EXIT, OnExitButton)
 		COMMAND_HANDLER_EX(IDC_CHECK_CTRL, BN_CLICKED, OnConfigChanged)
 		COMMAND_HANDLER_EX(IDC_CHECK_ALT, BN_CLICKED, OnConfigChanged)
 		COMMAND_HANDLER_EX(IDC_CHECK_SHIFT, BN_CLICKED, OnConfigChanged)
 		COMMAND_HANDLER_EX(IDC_COMBO_KEYS, CBN_SELCHANGE, OnConfigChanged)
 		MESSAGE_HANDLER_EX(UWM_MOUSEHOOKCLICKED, OnMouseHookClicked)
 		MESSAGE_HANDLER_EX(m_uTaskbarCreatedMsg, OnTaskbarCreated)
-		MESSAGE_HANDLER_EX(m_uTextfiyMsg, OnCustomTextifyMsg)
+		MESSAGE_HANDLER_EX(m_uTextifyMsg, OnCustomTextifyMsg)
 		MESSAGE_HANDLER_EX(UWM_NOTIFYICON, OnNotifyIcon)
 		MESSAGE_HANDLER_EX(UWM_BRING_TO_FRONT, OnBringToFront)
 		MESSAGE_HANDLER_EX(UWM_UPDATE_CHECKED, OnUpdateChecked)
@@ -60,6 +61,7 @@ public:
 	void OnOK(UINT uNotifyCode, int nID, CWindow wndCtl);
 	void OnCancel(UINT uNotifyCode, int nID, CWindow wndCtl);
 	void OnShowIni(UINT uNotifyCode, int nID, CWindow wndCtl);
+	void OnExitButton(UINT uNotifyCode, int nID, CWindow wndCtl);
 	void OnConfigChanged(UINT uNotifyCode, int nID, CWindow wndCtl);
 	LRESULT OnMouseHookClicked(UINT uMsg, WPARAM wParam, LPARAM lParam);
 	LRESULT OnTaskbarCreated(UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -77,14 +79,14 @@ private:
 	void ConfigToGui();
 	void InitNotifyIconData();
 	void NotifyIconRightClickMenu();
-	void MyEndDialog();
+	void Exit();
 
 	std::optional<UserConfig> m_config;
 	std::optional<MouseGlobalHook> m_mouseGlobalHook;
 	UINT m_uTaskbarCreatedMsg = RegisterWindowMessage(L"TaskbarCreated");
-	UINT m_uTextfiyMsg = RegisterWindowMessage(L"Textify");
+	UINT m_uTextifyMsg = RegisterWindowMessage(L"Textify");
 	NOTIFYICONDATA m_notifyIconData = {};
-	bool m_hideDialog;
+	bool m_hideDialog = false;
 	bool m_registeredHotKey = false;
 	bool m_checkingForUpdates = false;
 	bool m_closeWhenUpdateCheckDone = false;

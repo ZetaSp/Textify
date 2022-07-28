@@ -1,17 +1,72 @@
 #include "stdafx.h"
 #include "UserConfig.h"
 
-UserConfig::UserConfig(bool loadFromIniFile /*= true*/)
+namespace
 {
-	if(loadFromIniFile)
-		LoadFromIniFile();
+	CPath GetIniFilePath()
+	{
+		CPath iniFilePath;
+		GetModuleFileName(NULL, iniFilePath.m_strPath.GetBuffer(MAX_PATH), MAX_PATH);
+		iniFilePath.m_strPath.ReleaseBuffer();
+		iniFilePath.RenameExtension(L".ini");
+		return iniFilePath;
+	}
+
+	// Receives a path with an optional index, e.g.:
+	// C:\path\to\awesome.exe,101
+	// Removes the index from the string and returns it.
+	int ExtractIconIndex(PWSTR pathWithOptionalIndex)
+	{
+		size_t len = wcslen(pathWithOptionalIndex);
+		for(size_t i = len - 1; i > 0; i--)
+		{
+			WCHAR p = pathWithOptionalIndex[i];
+			if(p == ',')
+			{
+				if(i == len - 1)
+					break;
+
+				pathWithOptionalIndex[i] = L'\0';
+				return _wtoi(pathWithOptionalIndex + i + 1);
+			}
+
+			if(p < L'0' && p > L'9')
+				break;
+		}
+
+		return 0;
+	}
+
+	CPath RelativeToAbsolutePathExpanded(PWSTR relativePath)
+	{
+		CPath moduleFileNamePath;
+
+		GetModuleFileName(NULL, moduleFileNamePath.m_strPath.GetBuffer(MAX_PATH), MAX_PATH);
+		moduleFileNamePath.m_strPath.ReleaseBuffer();
+		moduleFileNamePath.RemoveFileSpec();
+
+		CString relativePathExpanded;
+		DWORD relativePathExpandedSize = ExpandEnvironmentStrings(relativePath, nullptr, 0);
+		ExpandEnvironmentStrings(relativePath, relativePathExpanded.GetBuffer(relativePathExpandedSize), relativePathExpandedSize);
+		relativePathExpanded.ReleaseBuffer();
+
+		CPath result;
+		result.Combine(moduleFileNamePath, relativePathExpanded);
+
+		return result;
+	}
+}
+
+UserConfig::UserConfig()
+{
+	LoadFromIniFile();
 }
 
 bool UserConfig::LoadFromIniFile()
 {
 	CPath iniFilePath = GetIniFilePath();
-	if(!iniFilePath)
-		return false;
+
+	WCHAR szBuffer[1025];
 
 	m_mouseHotKey.key = GetPrivateProfileInt(L"mouse", L"key", 0, iniFilePath);
 	m_mouseHotKey.ctrl = GetPrivateProfileInt(L"mouse", L"ctrl", 0, iniFilePath);
@@ -24,17 +79,34 @@ bool UserConfig::LoadFromIniFile()
 	m_keybdHotKey.shift = GetPrivateProfileInt(L"keyboard", L"shift", 0, iniFilePath);
 
 	m_uiLanguage = static_cast<LANGID>(GetPrivateProfileInt(L"config", L"ui_language", 0, iniFilePath));
-	m_checkForUpdates = GetPrivateProfileInt(L"config", L"check_for_updates", 0, iniFilePath);
+	m_checkForUpdates = GetPrivateProfileInt(L"config", L"check_for_updates", 1, iniFilePath);
 	m_autoCopySelection = GetPrivateProfileInt(L"config", L"auto_copy_selection", 0, iniFilePath);
+	m_hideWndOnStartup = GetPrivateProfileInt(L"config", L"hide_wnd_on_startup", 0, iniFilePath);
 	m_hideTrayIcon = GetPrivateProfileInt(L"config", L"hide_tray_icon", 0, iniFilePath);
+	m_textBoxNonResiable = GetPrivateProfileInt(L"config", L"text_box_non_resizable", 0, iniFilePath);
+	GetPrivateProfileString(L"config", L"font_name", L"", m_fontName.GetBuffer(LF_FACESIZE), LF_FACESIZE, iniFilePath);
+	m_fontName.ReleaseBuffer();
+	m_fontSize = GetPrivateProfileInt(L"config", L"font_size", 0, iniFilePath);
 	m_unicodeSpacesToAscii = GetPrivateProfileInt(L"config", L"unicode_spaces_to_ascii", 0, iniFilePath);
+
+	m_textRetrievalMethod = TextRetrievalMethod::default;
+	GetPrivateProfileString(L"config", L"text_retrieval_method", L"", szBuffer, ARRAYSIZE(szBuffer), iniFilePath);
+	if(_wcsicmp(szBuffer, L"msaa") == 0)
+	{
+		m_textRetrievalMethod = TextRetrievalMethod::msaa;
+	}
+	else if(_wcsicmp(szBuffer, L"uia") == 0)
+	{
+		m_textRetrievalMethod = TextRetrievalMethod::uia;
+	}
+
+	m_webButtonsIconSize = GetPrivateProfileInt(L"web_buttons", L"icon_size", 16, iniFilePath);
+	m_webButtonsPerRow = GetPrivateProfileInt(L"web_buttons", L"buttons_per_row", 8, iniFilePath);
 
 	for(int i = 1; ; i++)
 	{
 		CString iniSectionName;
 		iniSectionName.Format(L"web_button_%d", i);
-
-		WCHAR szBuffer[1025];
 
 		GetPrivateProfileString(iniSectionName, L"command", L"", szBuffer, ARRAYSIZE(szBuffer), iniFilePath);
 		if(*szBuffer == L'\0')
@@ -49,7 +121,8 @@ bool UserConfig::LoadFromIniFile()
 		GetPrivateProfileString(iniSectionName, L"icon", L"", szBuffer, ARRAYSIZE(szBuffer), iniFilePath);
 		if(*szBuffer != L'\0')
 		{
-			webButtonInfo.iconPath = RelativeToAbsolutePath(szBuffer);
+			webButtonInfo.iconIndex = ExtractIconIndex(szBuffer);
+			webButtonInfo.iconPath = RelativeToAbsolutePathExpanded(szBuffer);
 		}
 
 		GetPrivateProfileString(iniSectionName, L"key", L"", szBuffer, ARRAYSIZE(szBuffer), iniFilePath);
@@ -66,8 +139,6 @@ bool UserConfig::LoadFromIniFile()
 		CString iniKeyName;
 		iniKeyName.Format(L"%d", i);
 
-		WCHAR szBuffer[1025];
-
 		GetPrivateProfileString(L"exclude", iniKeyName, L"", szBuffer, ARRAYSIZE(szBuffer), iniFilePath);
 		if(*szBuffer == L'\0')
 			break;
@@ -78,7 +149,7 @@ bool UserConfig::LoadFromIniFile()
 	return true;
 }
 
-bool UserConfig::SaveToIniFile()
+bool UserConfig::SaveToIniFile() const
 {
 	CPath iniFilePath = GetIniFilePath();
 	if(!iniFilePath)
@@ -106,100 +177,5 @@ bool UserConfig::SaveToIniFile()
 
 	// Don't write the other configuration, as there's no GUI for it.
 
-	/*str.Format(L"%d", m_keybdHotKey.key);
-	if(!WritePrivateProfileString(L"keyboard", L"key", str, iniFilePath))
-		succeeded = false;
-
-	str.Format(L"%d", m_keybdHotKey.ctrl ? 1 : 0);
-	if(!WritePrivateProfileString(L"keyboard", L"ctrl", str, iniFilePath))
-		succeeded = false;
-
-	str.Format(L"%d", m_keybdHotKey.alt ? 1 : 0);
-	if(!WritePrivateProfileString(L"keyboard", L"alt", str, iniFilePath))
-		succeeded = false;
-
-	str.Format(L"%d", m_keybdHotKey.shift ? 1 : 0);
-	if(!WritePrivateProfileString(L"keyboard", L"shift", str, iniFilePath))
-		succeeded = false;
-
-	for(int i = 1; ; i++)
-	{
-		CString iniSectionName;
-		iniSectionName.Format(L"web_button_%d", i);
-
-		if(static_cast<int>(m_webButtonInfos.size()) < i)
-		{
-			if(!WritePrivateProfileString(iniSectionName, nullptr, nullptr, iniFilePath))
-				succeeded = false;
-
-			continue;
-		}
-
-		WebButtonInfo& webButtonInfo = m_webButtonInfos[i - 1];
-
-		CPath relativeIconPath = AbsoluteToRelativePath(webButtonInfo.iconPath);
-		if(!WritePrivateProfileString(iniSectionName, L"icon", relativeIconPath.m_strPath, iniFilePath))
-			succeeded = false;
-
-		if(!WritePrivateProfileString(iniSectionName, L"url", webButtonInfo.url, iniFilePath))
-			succeeded = false;
-
-		str.Format(L"%d", webButtonInfo.externalBrowser ? 1 : 0);
-		if(!WritePrivateProfileString(iniSectionName, L"external_browser", str, iniFilePath))
-			succeeded = false;
-
-		str.Format(L"%d", webButtonInfo.width);
-		if(!WritePrivateProfileString(iniSectionName, L"width", str, iniFilePath))
-			succeeded = false;
-
-		str.Format(L"%d", webButtonInfo.height);
-		if(!WritePrivateProfileString(iniSectionName, L"height", str, iniFilePath))
-			succeeded = false;
-	}*/
-
 	return succeeded;
-}
-
-CPath UserConfig::GetIniFilePath()
-{
-	CPath iniFilePath;
-	GetModuleFileName(NULL, iniFilePath.m_strPath.GetBuffer(MAX_PATH), MAX_PATH);
-	iniFilePath.m_strPath.ReleaseBuffer();
-	iniFilePath.RenameExtension(L".ini");
-	return iniFilePath;
-}
-
-CPath UserConfig::RelativeToAbsolutePath(CPath relativePath)
-{
-	CPath moduleFileNamePath;
-
-	GetModuleFileName(NULL, moduleFileNamePath.m_strPath.GetBuffer(MAX_PATH), MAX_PATH);
-	moduleFileNamePath.m_strPath.ReleaseBuffer();
-	moduleFileNamePath.RemoveFileSpec();
-
-	CPath result;
-	result.Combine(moduleFileNamePath, relativePath);
-
-	return result;
-}
-
-CPath UserConfig::AbsoluteToRelativePath(CPath absolutePath)
-{
-	CPath moduleFileNamePath;
-
-	GetModuleFileName(NULL, moduleFileNamePath.m_strPath.GetBuffer(MAX_PATH), MAX_PATH);
-	moduleFileNamePath.m_strPath.ReleaseBuffer();
-	moduleFileNamePath.RemoveFileSpec();
-
-	CPath result;
-	result.RelativePathTo(moduleFileNamePath, FILE_ATTRIBUTE_DIRECTORY, absolutePath, FILE_ATTRIBUTE_NORMAL);
-
-	if(result.m_strPath.GetLength() > 2 &&
-		result.m_strPath[0] == L'.' &&
-		result.m_strPath[1] == L'\\')
-	{
-		result.m_strPath = result.m_strPath.Right(result.m_strPath.GetLength() - 2);
-	}
-
-	return result;
 }

@@ -13,31 +13,41 @@ struct WebButtonInfo
 	CString command;
 	CString name;
 	CPath iconPath;
+	int iconIndex;
 	WCHAR acceleratorKey;
 	int width;
 	int height;
 };
 
+enum class TextRetrievalMethod
+{
+	default,
+	msaa,
+	uia
+};
+
 class UserConfig
 {
 public:
-	UserConfig(bool loadFromIniFile = true);
+	UserConfig();
 
 	bool LoadFromIniFile();
-	bool SaveToIniFile();
+	bool SaveToIniFile() const;
 
-	HotKey m_mouseHotKey = HotKey{ VK_MBUTTON, false, false, true };
-	HotKey m_keybdHotKey = HotKey{ 'T', true, true, true };
-	LANGID m_uiLanguage = false;
-	bool m_checkForUpdates = true;
-	bool m_autoCopySelection = false;
-	bool m_hideTrayIcon = false;
-	bool m_unicodeSpacesToAscii = false;
+	HotKey m_mouseHotKey;
+	HotKey m_keybdHotKey;
+	LANGID m_uiLanguage;
+	bool m_checkForUpdates;
+	bool m_autoCopySelection;
+	bool m_hideWndOnStartup;
+	bool m_hideTrayIcon;
+	bool m_textBoxNonResiable;
+	CString m_fontName;
+	int m_fontSize;
+	bool m_unicodeSpacesToAscii;
+	TextRetrievalMethod m_textRetrievalMethod;
+	int m_webButtonsIconSize;
+	int m_webButtonsPerRow;
 	std::vector<WebButtonInfo> m_webButtonInfos;
 	std::vector<CString> m_excludedPrograms;
-
-private:
-	CPath GetIniFilePath();
-	CPath RelativeToAbsolutePath(CPath relativePath);
-	CPath AbsoluteToRelativePath(CPath absolutePath);
 };

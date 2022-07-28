@@ -9,6 +9,7 @@ namespace
 		None,
 		Chrome,
 		Edge,
+		Brave,
 		Firefox,
 		IeControl
 	};
@@ -80,6 +81,13 @@ bool CommandLaunch(const WCHAR* command, const WCHAR* replacement, int width, in
 		return ExecuteCommand(edgeCommand);
 	}
 
+	if(popupBrowserType == PopupBrowserType::Brave)
+	{
+		formattedCommand.Replace(L"\"", L"");
+		CString braveCommand = L"brave.exe --app=\"" + formattedCommand + L"\"";
+		return ExecuteCommand(braveCommand);
+	}
+
 	if(popupBrowserType == PopupBrowserType::Firefox)
 	{
 		formattedCommand.Replace(L"\"", L"");
@@ -108,13 +116,13 @@ namespace
 			L"Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice",
 			KEY_QUERY_VALUE | KEY_WOW64_64KEY);
 		if(dwError != ERROR_SUCCESS)
-			return PopupBrowserType::IeControl;
+			return PopupBrowserType::None;
 
 		WCHAR szProgId[64];
 		ULONG nChars = ARRAYSIZE(szProgId);
 		dwError = regKey.QueryStringValue(L"ProgId", szProgId, &nChars);
 		if(dwError != ERROR_SUCCESS)
-			return PopupBrowserType::IeControl;
+			return PopupBrowserType::None;
 
 		// ProgId string reference:
 		// https://superuser.com/a/571854
@@ -133,12 +141,20 @@ namespace
 			return PopupBrowserType::Edge;
 		}
 
-		if(_wcsicmp(szProgId, L"FirefoxURL") == 0)
+		if(_wcsicmp(szProgId, L"BraveHTML") == 0 ||
+			_wcsicmp(szProgId, L"BraveBHTML") == 0 ||
+			_wcsicmp(szProgId, L"BraveDHTML") == 0)
+		{
+			return PopupBrowserType::Brave;
+		}
+
+		if(_wcsicmp(szProgId, L"FirefoxURL") == 0 ||
+			_wcsnicmp(szProgId, L"FirefoxURL-", sizeof("FirefoxURL-") - 1) == 0)
 		{
 			return PopupBrowserType::Firefox;
 		}
 
-		return PopupBrowserType::IeControl;
+		return PopupBrowserType::None;
 	}
 
 	bool ExecuteCommand(const WCHAR* command)
